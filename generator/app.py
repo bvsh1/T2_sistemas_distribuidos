@@ -8,7 +8,7 @@ import httpx # Sigue siendo necesario
 from typing import Optional
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("simple_generator")
+logger = logging.getLogger("GENERATOR")
 
 # --- Configuración ---
 DATASET_PATH = "/app/train.csv"
@@ -25,17 +25,17 @@ def load_questions_from_csv():
         questions_list = df['question'].dropna().astype(str).str.strip().tolist()
         
         if not questions_list:
-            logger.error("No se encontraron preguntas válidas en el dataset.")
+            logger.error("GENERATOR: No se encontraron preguntas válidas en el dataset. CSV vacío o corrupto.")
             return None
             
-        logger.info(f"Cargadas {len(questions_list)} preguntas del dataset.")
+        logger.info(f"GENERATOR: Dataset cargado. {len(questions_list)} preguntas en memoria.")
         return questions_list
         
     except FileNotFoundError:
-        logger.error(f"ERROR: No se encontró el dataset en {DATASET_PATH}")
+        logger.critical(f"GENERATOR: ERROR FATAL: No se encontró el dataset en {DATASET_PATH}")
         return None
     except Exception as e:
-        logger.error(f"Error al cargar o procesar el CSV: {e}")
+        logger.error(f"GENERATOR: Error al cargar/procesar {DATASET_PATH}: {e}")
         return None
 
 def send_question_to_gateway(question: str):
@@ -49,20 +49,20 @@ def send_question_to_gateway(question: str):
         
         if response.status_code == 200:
             # 200 OK = Cache Hit
-            logger.info(f"Respuesta (Cache Hit): {question[:40]}...")
+            logger.info(f"GATEWAY_RSP: [200 HIT] {question[:40]}...")
         elif response.status_code == 202:
             # 202 Accepted = Encolado en Kafka
-            logger.info(f"Respuesta (Encolado): {question[:40]}...")
+            logger.info(f"GATEWAY_RSP: [202 QUEUED] {question[:40]}...")
         else:
             # Error del servidor BDD
-            logger.warning(f"Error del Gateway (Status: {response.status_code}): {response.text}")
+            logger.warning(f"GATEWAY_RSP: Error del Gateway (Status: {response.status_code}): {response.text}")
 
     except httpx.RequestError as e:
-        logger.error(f"Error de conexión al BDD-Gateway en {e.request.url!r}: {e}.")
+        logger.error(f"GENERATOR: Error de conexión HTTP a {e.request.url!r}: {e}.")
 
 def run_generator_loop(questions):
     """Bucle infinito para generar tráfico."""
-    logger.info("Iniciando bucle de generación de tráfico...")
+    logger.info("GENERATOR: Iniciando bucle de generación de tráfico.")
     client = httpx.Client() # Usamos un cliente persistente
     
     while True:
@@ -75,18 +75,18 @@ def run_generator_loop(questions):
             time.sleep(GENERATION_INTERVAL_SECONDS)
             
         except Exception as e:
-            logger.error(f"Error grave en el bucle del generador: {e}")
+            logger.error(f"GENERATOR: Error grave en el bucle principal: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
-    logger.info("Iniciando Generador de Tráfico (Simple)...")
-    logger.info(f"Gateway de BDD en: {BDD_SERVICE_URL}")
+    logger.info("GENERATOR: Iniciando servicio de Generador de Tráfico.")
+    logger.info(f"GENERATOR: Apuntando al Gateway en: {BDD_SERVICE_URL}")
     
     questions = load_questions_from_csv()
     if questions:
         # Pequeña espera para que la BDD inicie primero
-        logger.info("Esperando 5s a que inicie la BDD...")
+        logger.info("GENERATOR: Esperando 5s a que inicie la BDD...")
         time.sleep(5)
         run_generator_loop(questions)
     else:
-        logger.error("El generador no puede iniciar sin preguntas. Terminando.")
+        logger.critical("GENERATOR: No hay preguntas cargadas. El servicio no puede iniciar. Terminando.")

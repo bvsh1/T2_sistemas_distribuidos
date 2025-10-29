@@ -6,7 +6,7 @@ from kafka import KafkaConsumer, KafkaProducer
 from kafka.errors import NoBrokersAvailable
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("retry_quota")
+logger = logging.getLogger("RETRY_QUOTA")
 
 # Configuración
 BOOTSTRAP_SERVERS = os.getenv("BOOTSTRAP_SERVERS", "kafka:9092")
@@ -31,17 +31,17 @@ def create_kafka_client(client_type):
                     bootstrap_servers=BOOTSTRAP_SERVERS,
                     value_serializer=lambda v: json.dumps(v).encode('utf-8')
                 )
-            logger.info(f"Kafka {client_type} conectado exitosamente.")
+            logger.info(f"KAFKA_CLIENT: Kafka {client_type} conectado exitosamente.")
             return client
         except NoBrokersAvailable:
-            logger.warning(f"No se pudo conectar a Kafka ({BOOTSTRAP_SERVERS}). Reintentando en 5 segundos...")
+            logger.warning(f"KAFKA_CLIENT: No se pudo conectar a Kafka ({BOOTSTRAP_SERVERS}). Reintentando en 5s...")
             time.sleep(5)
 
 def main():
     consumer = create_kafka_client("consumer")
     producer = create_kafka_client("producer")
 
-    logger.info(f"Escuchando en '{TOPIC_INPUT}' para errores de CUOTA...")
+    logger.info(f"RETRY_QUOTA: Servicio iniciado. Escuchando {TOPIC_INPUT} para errores 429.")
 
     for message in consumer:
         try:
@@ -49,7 +49,7 @@ def main():
             msg_id = data.get('id', 'N/A')
             
             # 1. Log del error recibido
-            logger.warning(f"Error de CUOTA recibido (ID: {msg_id}). Esperando {RETRY_DELAY_SECONDS}s...")
+            logger.warning(f"RETRY_QUOTA: [429 RECIBIDO] (ID: {msg_id}). Pausa larga de {RETRY_DELAY_SECONDS}s activada.")
             
             # 2. Aplicar la lógica de reintento (espera larga)
             time.sleep(RETRY_DELAY_SECONDS)
@@ -57,10 +57,10 @@ def main():
             # 3. Devolver a la cola principal del LLM
             # (No incrementamos el 'attempt' aquí, es un reintento de cuota)
             producer.send(TOPIC_OUTPUT, data)
-            logger.info(f"Re-encolado (ID: {msg_id}) en '{TOPIC_OUTPUT}' post-cuota.")
+            logger.info(f"RETRY_QUOTA: [RE-ENCOLADO] (ID: {msg_id}) en {TOPIC_OUTPUT} después de la espera.")
             
         except Exception as e:
-            logger.error(f"Error procesando mensaje en retry_quota: {e}")
+            logger.error(f"RETRY_QUOTA: Error procesando mensaje: {e}")
 
 if __name__ == "__main__":
     main()

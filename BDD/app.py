@@ -18,7 +18,8 @@ from contextlib import asynccontextmanager
 # Configuración
 # ================================================================
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("storage_gateway_service")
+# Logger principal de este servicio
+logger = logging.getLogger("BDD_GATEWAY")
 
 DB_URL = os.getenv("DB_URL", "sqlite:///./data/data.db")
 BOOTSTRAP_SERVERS = os.getenv("BOOTSTRAP_SERVERS", "kafka:9092")
@@ -46,9 +47,9 @@ class QuestionAnswer(Base):
     score = Column(Float, index=True)
 
 def create_db_and_tables():
-    logger.info("Verificando y creando tablas de la BDD...")
+    logger.info("BDD: Verificando y creando tablas si es necesario.")
     Base.metadata.create_all(bind=engine)
-    logger.info("Tablas de la BDD listas.")
+    logger.info("BDD: Tablas listas y operativas.")
 
 def get_db():
     db = SessionLocal()
@@ -61,7 +62,7 @@ def get_db():
 # SECCIÓN 2: Consumidor de Kafka (Sin cambios)
 # =================================================================
 def consume_results_from_kafka():
-    logger.info("Iniciando hilo consumidor de Kafka...")
+    logger.info("CONSUMIDOR_BDD: Iniciando hilo consumidor de Kafka.")
     while True:
         try:
             consumer = KafkaConsumer(
@@ -71,7 +72,7 @@ def consume_results_from_kafka():
                 group_id='storage_consumer_group',
                 value_deserializer=lambda v: json.loads(v.decode('utf-8'))
             )
-            logger.info(f"Consumidor conectado. Escuchando tópico: {TOPIC_CONSUME_VALIDATED}")
+            logger.info(f"CONSUMIDOR_BDD: Conectado. Escuchando {TOPIC_CONSUME_VALIDATED}.")
             # ... (el resto de tu lógica de consumidor no cambia) ...
             for message in consumer:
                 try:
@@ -84,7 +85,7 @@ def consume_results_from_kafka():
                         if existing_qa:
                             existing_qa.answer = data['answer']
                             existing_qa.score = data['score']
-                            logger.info(f"Consumidor: Actualizando pregunta existente: {data['question'][:20]}...")
+                            logger.info(f"CONSUMIDOR_BDD: Actualizando entrada existente: {data['question'][:20]}...")
                         else:
                             new_qa = QuestionAnswer(
                                 question=data['question'],
@@ -92,17 +93,17 @@ def consume_results_from_kafka():
                                 score=data['score']
                             )
                             db.add(new_qa)
-                            logger.info(f"Consumidor: Guardando nueva pregunta: {data['question'][:20]}...")
+                            logger.info(f"CONSUMIDOR_BDD: Guardando nueva Q&A: {data['question'][:20]}...")
                         db.commit()
                     except Exception as e:
                         db.rollback()
                     finally:
                         db.close()
                 except Exception as e:
-                    logger.error(f"Error en bucle consumidor: {e}")
+                    logger.error(f"CONSUMIDOR_BDD: Error en bucle principal: {e}")
 
         except Exception as e:
-            logger.error(f"Error al conectar consumidor de Kafka: {e}. Reintentando...")
+            logger.error(f"CONSUMIDOR_BDD: Error de conexión a Kafka: {e}. Reintentando en 5s.")
             time.sleep(5)
 
 # =================================================================
@@ -118,15 +119,15 @@ def create_kafka_producer():
                 bootstrap_servers=BOOTSTRAP_SERVERS,
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
-            logger.info("Productor de Kafka (para BDD) conectado.")
+            logger.info("PRODUCTOR_BDD: Productor de Kafka conectado.")
             return
         except NoBrokersAvailable:
-            logger.warning("No se pudo conectar el productor de Kafka. Reintentando en 5s...")
+            logger.warning("PRODUCTOR_BDD: No se pudo conectar. Reintentando en 5s...")
             time.sleep(5)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Iniciando lifespan (startup)...")
+    logger.info("API: Iniciando lifespan (startup)...")
     # 1. Crea las tablas
     create_db_and_tables()
     # 2. Inicia el consumidor en un hilo
@@ -138,7 +139,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    logger.info("Cerrando lifespan (shutdown)...")
+    logger.info("API: Cerrando lifespan (shutdown)...")
     if kafka_producer:
         kafka_producer.close()
 
@@ -165,7 +166,7 @@ async def process_question(request: QuestionRequest, db: Session = Depends(get_d
         
         if result and result.score is not None:
             # 2. CACHE HIT: Encontrada. Devolver 200 OK.
-            logger.info(f"GATEWAY (HIT): Pregunta encontrada en BDD. {question_text[:30]}...")
+            logger.info(f"GATEWAY_API: [CACHE HIT] Pregunta encontrada en BDD. {question_text[:30]}...")
             return {
                 "status": "cache_hit",
                 "processed": True,
@@ -175,10 +176,10 @@ async def process_question(request: QuestionRequest, db: Session = Depends(get_d
             }
         else:
             # 3. CACHE MISS: No encontrada. Enviar a Kafka.
-            logger.info(f"GATEWAY (MISS): Encolando en Kafka. {question_text[:30]}...")
+            logger.info(f"GATEWAY_API: [CACHE MISS] Pregunta no encontrada. Encolando en Kafka. {question_text[:30]}...")
             
             if not kafka_producer:
-                logger.error("Productor de Kafka no está listo. No se puede encolar.")
+                logger.error("GATEWAY_API: Productor de Kafka NO está listo. Imposible encolar.")
                 raise HTTPException(status_code=503, detail="Servicio de encolado no disponible")
 
             message = {
@@ -200,10 +201,10 @@ async def process_question(request: QuestionRequest, db: Session = Depends(get_d
             )
 
     except OperationalError as e:
-        logger.error(f"Error de base de datos en /process_question: {e}")
+        logger.error(f"GATEWAY_API: Error de BDD en /process_question: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
     except Exception as e:
-        logger.error(f"Error inesperado en /process_question: {e}")
+        logger.error(f"GATEWAY_API: Error inesperado en /process_question: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # Dejamos los otros endpoints por si los quieres usar para depurar
