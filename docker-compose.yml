@@ -1,3 +1,4 @@
+
 services:
   # --- Servicios Hadoop ---
   namenode:
@@ -6,11 +7,13 @@ services:
     restart: always
     ports:
       - "9870:9870" # Interfaz web de HDFS
-      - "9000:9000" # Puerto de HDFS
+      - "9000:9000" # Puerto de HDFS (IPC)
     volumes:
       - hadoop_namenode_data:/hadoop/dfs/name
     environment:
       - CLUSTER_NAME=test
+      # ¡ESTA LÍNEA ES LA SOLUCIÓN! Forzamos el puerto 9000
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
     networks:
       - analysis-net
 
@@ -22,22 +25,27 @@ services:
       - hadoop_datanode_data:/hadoop/dfs/data
     environment:
       - SERVICE_PRECONDITION=namenode:9870
+      # ¡AQUÍ TAMBIÉN! El datanode debe saber que debe buscar en el 9000
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
     depends_on:
       - namenode
     networks:
       - analysis-net
 
   # --- Servicio de Análisis ---
+  # ... (tus otros servicios arriba)
+
   batch_analysis:
     build: ./batch_analysis
     container_name: batch_analysis
     depends_on:
       - namenode
       - datanode
+    environment:
+      # ¡ESTA LÍNEA SOLUCIONA EL PROBLEMA DE LOS LOGS!
+      - PYTHONUNBUFFERED=1
     volumes:
-      # Monta la carpeta de resultados para verlos en tu PC
       - ./batch_analysis/results:/app/results
-      # Monta los archivos de datos (que generaste) como solo lectura
       - ./data/human_answers.txt:/app/data/human_answers.txt:ro
       - ./data/llm_answers.txt:/app/data/llm_answers.txt:ro
     networks:
